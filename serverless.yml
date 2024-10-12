@@ -1,0 +1,88 @@
+Description: A stack containing resources for an AWS Serverless Lambda function deployed through an AWS ECR.
+
+Parameters:
+  applicationName:
+    Type: String
+    Default: amazing-solution
+    Description: Name of the application
+  securityGroupID:
+    Type: String
+    Description: ID of the security group allowing ingress into the VPC resource Lambda is accessing.
+  subnetId:
+    Type: String
+    Description: ID of the subnet in which the VPC resource is deployed.
+
+Resources:
+  LambdaECR:
+      Type: AWS::ECR::Repository
+      Description: ECR to hold image of Lambda function
+      Properties:
+        ImageScanningConfiguration:
+          ScanOnPush: true
+        RepositoryName: !Sub "${applicationName}-ecr"
+        RepositoryPolicyText:
+          Version: "2012-10-17"
+          Statement:
+            - Sid: ECRLambdaPolicy
+              Effect: Allow
+              Principal:
+                Service:
+                  - lambda.amazonaws.com
+              Action:
+                - "ecr:BatchGetImage"
+                - "ecr:GetDownloadUrlForLayer"
+        Tags:
+          - Key: Name
+            Value: !Sub ${application}-lambda-ecr
+
+  IAMRole:
+      Type: AWS::IAM::Role
+      Description: Role to allow Lambda to basic access to VPC
+      Properties:
+        AssumeRolePolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service:
+                  - lambda.amazonaws.com
+              Action:
+                - "sts:AssumeRole"
+        ManagedPolicyArns:
+          - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+          - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+        RoleName: !Sub ${applicationName}-lambda-executor
+
+  Lambda:
+      Type: AWS::Lambda::Function
+      Properties:
+        FunctionName: !Sub ${applicationName}-lambda
+        Code:
+          ImageUri: !GetAtt LambdaECR.RepositoryUri
+        PackageType: Image
+        Role: !GetAtt IAMRole.Arn
+        VpcConfig:
+          SecurityGroupIds:
+            - !Ref securityGroupID
+          SubnetIds:
+            - !Ref subnetID
+        Environment:
+          Variables:
+            DB_NAME: !Ref applicationName
+            DB_HOST: !Sub '{{resolve:secretsmanager:${applicationName}-dbHost:SecretString}}'
+            DB_USER: !Sub '{{resolve:secretsmanager:${applicationName}-dbUsername:SecretString}}'
+            DB_PASSWORD: !Sub '{{resolve:secretsmanager:${applicationName}-dbPassword:SecretString}}'
+        Timeout: 90
+        Tags:
+          - Key: Name
+            Value: !Sub ${applicationName}-lambda
+
+Outputs:
+  ECRUri:
+    Value: !GetAtt LambdaECR.RepositoryURi
+    Export:
+      Name: !Sub ${applicationName}-ECRUri
+  LambdaArn:
+    Value: !GetAtt Lambda.Arn
+    Export:
+      Name: !Sub ${applicationName}-LambdaArn
